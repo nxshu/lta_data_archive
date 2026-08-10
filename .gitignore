@@ -1,0 +1,24 @@
+# Environment variables and credentials (CRITICAL for security)
+.env
+*.env.local
+*.pod
+
+# Node.js dependencies
+node_modules/
+npm-debug.log*
+
+# Python build and virtual environments
+__pycache__/
+*.pyc
+venv/
+.env/
+
+# Operating System files
+.DS_Store
+Thumbs.db
+
+# IDE and Editor configurations
+.vscode/
+.idea/
+*.suo
+*.ntvs*
