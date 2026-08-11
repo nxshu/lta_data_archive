@@ -43,7 +43,7 @@ def main():
             print(f"Failed to fetch {name}: {e}")
             continue
 
-        log_path = "data/{name}_log.jsonl"
+        log_path = f"data/{name}_log.jsonl"
         with open(log_path, "a") as f: # append mode
             f.write(json.dumps({"timestamp": timestamp, "data": data})  + "\n")
 
