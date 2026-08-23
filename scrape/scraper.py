@@ -87,8 +87,12 @@ def main():
         save_service_data(conn, service_data)
 
         for line in LINES:
-            crowd_data = fetch(CROWD_URL + "=" + line)
-            save_crowd_data(conn, line, crowd_data)
+            try:
+                crowd_data = fetch(CROWD_URL + "=" + line)
+                save_crowd_data(conn, line, crowd_data)
+            except requests.exceptions.HTTPError as e:
+                print(f"Failed to fetch {line}:{e}")
+                continue
 
     finally:
         conn.close()
