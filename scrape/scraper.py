@@ -1,23 +1,15 @@
 import requests
 import json
-from datetime import datetime
 import os
+import psycopg2
+import psycopg2.extras
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
-ENDPOINTS = {
-    "train_service_alerts": "https://datamall2.mytransport.sg/ltaodataservice/TrainServiceAlerts",
-    "station_crowd_ccl": "https://datamall2.mytransport.sg/ltaodataservice/PCDRealTime?TrainLine=CCL",
-    "station_crowd_cel": "https://datamall2.mytransport.sg/ltaodataservice/PCDRealTime?TrainLine=CEL",
-    "station_crowd_cgl": "https://datamall2.mytransport.sg/ltaodataservice/PCDRealTime?TrainLine=CGL",
-    "station_crowd_dtl": "https://datamall2.mytransport.sg/ltaodataservice/PCDRealTime?TrainLine=DTL",
-    "station_crowd_ewl": "https://datamall2.mytransport.sg/ltaodataservice/PCDRealTime?TrainLine=EWL",
-    "station_crowd_nel": "https://datamall2.mytransport.sg/ltaodataservice/PCDRealTime?TrainLine=NEL",
-    "station_crowd_nsl": "https://datamall2.mytransport.sg/ltaodataservice/PCDRealTime?TrainLine=NSL",
-    "station_crowd_bpl": "https://datamall2.mytransport.sg/ltaodataservice/PCDRealTime?TrainLine=BPL",
-    "station_crowd_slrt": "https://datamall2.mytransport.sg/ltaodataservice/PCDRealTime?TrainLine=SLRT",
-    "station_crowd_plrt": "https://datamall2.mytransport.sg/ltaodataservice/PCDRealTime?TrainLine=PLRT",
-    "station_crowd_tel": "https://datamall2.mytransport.sg/ltaodataservice/PCDRealTime?TrainLine=TEL",
-}
+SERVICE_URL = "https://datamall2.mytransport.sg/ltaodataservice/TrainServiceAlerts"
+CROWD_URL = "https://datamall2.mytransport.sg/ltaodataservice/PCDRealTime?TrainLine"
+
+LINES = ["CCL", "CEL", "CGL", "DTL", "EWL", "NEL", "NSL", "BPL", "SLRT", "PLRT", "TEL"]
 
 def fetch(url):
     
@@ -31,21 +23,75 @@ def fetch(url):
 
     return response.json()
 
+def get_connection():
+    return psycopg2.connect(os.environ["DATABASE_URL"])
+
+def save_service_data(conn, data):
+    now = datetime.now(ZoneInfo("Asia/Singapore"))
+
+    status_data = data.get("value", {})
+
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO service_status (scraped_at, status, affected_segments, messages, raw)
+            VALUES (%s, %s, %s, %s, %s)
+            """,
+            (
+                now,
+                status_data.get("Status"),
+                json.dumps(status_data.get("AffectedSegments", [])),
+                json.dumps(status_data.get("Message", [])),
+                json.dumps(status_data)
+            )
+        )
+
+    conn.commit()
+
+def save_crowd_data(conn, line, data):
+    now = datetime.now(ZoneInfo("Asia/Singapore"))
+    stations = data.get("value", [])
+
+    rows = []
+    for station in stations:
+        rows.append((
+            now,
+            line,
+            station.get("Station"),
+            station.get("StartTime"),
+            station.get("EndTime"),
+            station.get("CrowdLevel"),
+            json.dumps(station)
+        ))
+
+    if not rows:
+        return
+
+    with conn.cursor() as cur:
+        psycopg2.extras.execute_values(
+            cur,
+            """
+            INSERT INTO crowd_data_station (scraped_at, line, station_code, start_time, end_time, crowd_level, raw)
+            VALUES %s
+            ON CONFLICT (line, station_code, start_time) DO NOTHING
+            """,
+            rows
+        )
+
+    conn.commit()
+
 def main():
-    timestamp = datetime.now(ZoneInfo("Asia/Singapore")).strftime("%Y-%m-%dT%H-%M-%S")
+    conn = get_connection()
+    try:
+        service_data = fetch(SERVICE_URL)
+        save_service_data(conn, service_data)
 
-    os.makedirs("data", exist_ok=True)
+        for line in LINES:
+            crowd_data = fetch(CROWD_URL + "=" + line)
+            save_crowd_data(conn, line, crowd_data)
 
-    for name, url in ENDPOINTS.items():
-        try:
-            data = fetch(url)
-        except requests.exceptions.RequestException as e:
-            print(f"Failed to fetch {name}: {e}")
-            continue
-
-        log_path = f"data/{name}_log.jsonl"
-        with open(log_path, "a") as f: # append mode
-            f.write(json.dumps({"timestamp": timestamp, "data": data})  + "\n")
+    finally:
+        conn.close()
 
 if __name__ == "__main__": # when file is run directly
     main()
